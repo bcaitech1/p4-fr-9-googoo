@@ -1,0 +1,5 @@
+/log
+/submit
+.ipynb_checkpoints/
+*.cpython-37.pyc
+*.cpython-38.pyc
