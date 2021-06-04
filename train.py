@@ -89,10 +89,10 @@ def run_epoch(
 
             # The last batch may not be a full batch
             curr_batch_size = len(input)
-            expected = d["truth"]["encoded"].to(device)
+            expected = d["truth"]["encoded"].to(device) # 0 GTs 1 -1 -1...
 
             # Replace -1 with the PAD token
-            expected[expected == -1] = data_loader.dataset.token_to_id[PAD]
+            expected[expected == -1] = data_loader.dataset.token_to_id[PAD] # 0 GTs 1 2 2.....
 
             output = model(input, expected, train, teacher_forcing_ratio)
             
@@ -122,7 +122,7 @@ def run_epoch(
 
             losses.append(loss.item())
             
-            expected[expected == data_loader.dataset.token_to_id[PAD]] = -1
+            expected[expected == data_loader.dataset.token_to_id[PAD]] = -1 # 0 Preds 1 -1 -1....
             expected_str = id_to_string(expected, data_loader,do_eval=1)
             sequence_str = id_to_string(sequence, data_loader,do_eval=1)
             wer += word_error_rate(sequence_str,expected_str)
