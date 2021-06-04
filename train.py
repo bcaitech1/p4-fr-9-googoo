@@ -31,11 +31,14 @@ def id_to_string(tokens, data_loader,do_eval=0): # 0 Preds 1 -1 -1....
     result = []
     if do_eval:
         eos_id =  data_loader.dataset.token_to_id["<EOS>"]
-        ignore_ids = dict(
-            data_loader.dataset.token_to_id["<PAD>"] = 1,
-            data_loader.dataset.token_to_id["<SOS>"] = 1,
-            -1 = 1,
-        )
+        pad_id = data_loader.dataset.token_to_id["<PAD>"]
+        sos_id = data_loader.dataset.token_to_id["<SOS>"]
+        pad_id2 = -1
+        ignore_ids = {
+            pad_id : 1,
+            sos_id : 1,
+            pad_id2 : 1,
+        }
     for example in tokens:
         string = ""
         if do_eval:  # 계산 용도 => score 와 관련이 있다.
