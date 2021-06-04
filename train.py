@@ -140,9 +140,9 @@ def run_epoch(
             
     expected = id_to_string(expected, data_loader)
     sequence = id_to_string(sequence, data_loader)
-    print("-" * 10 + "GT ({})".format("train" if train else "valid"))
+    print("\n" + "- - " * 10 + "GT ({})".format("train" if train else "valid"))
     print(*expected[:3], sep="\n")
-    print("-" * 10 + "PR ({})".format("train" if train else "valid"))
+    print("\n" + "- - " * 10 + "PR ({})".format("train" if train else "valid"))
     print(*sequence[:3], sep="\n")
 
     result = {
