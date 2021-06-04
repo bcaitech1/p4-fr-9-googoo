@@ -27,24 +27,28 @@ from scheduler import CircularLRBeta
 
 from metrics import word_error_rate,sentence_acc
 
-def id_to_string(tokens, data_loader,do_eval=0):
+def id_to_string(tokens, data_loader,do_eval=0): # 0 Preds 1 -1 -1....
     result = []
     if do_eval:
-        special_ids = [data_loader.dataset.token_to_id["<PAD>"], data_loader.dataset.token_to_id["<SOS>"],
-                       data_loader.dataset.token_to_id["<EOS>"]]
-
+        eos_id =  data_loader.dataset.token_to_id["<EOS>"]
+        ignore_ids = dict(
+            data_loader.dataset.token_to_id["<PAD>"] = 1,
+            data_loader.dataset.token_to_id["<SOS>"] = 1,
+            -1 = 1,
+        )
     for example in tokens:
         string = ""
-        if do_eval:
+        if do_eval:  # 계산 용도 => score 와 관련이 있다.
             for token in example:
                 token = token.item()
-                if token not in special_ids:
-                    if token != -1:
-                        string += data_loader.dataset.id_to_token[token] + " "
-        else:
+                if token == eos_id: # <EOS>만나면 종료한다.
+                    break
+                if token not in ignore_ids: # eos 외 무시할 id들을 체크한다.
+                    string += data_loader.dataset.id_to_token[token] + " "
+        else: # display 용도.
             for token in example:
                 token = token.item()
-                if token != -1:
+                if token != -1: # 길이 채우기 위한 -1만 무시한다.
                     string += data_loader.dataset.id_to_token[token] + " "
 
         result.append(string)
@@ -133,7 +137,7 @@ def run_epoch(
             total_symbols += torch.sum(expected[:, 1:] != -1, dim=(0, 1)).item()
 
             pbar.update(curr_batch_size)
-
+            
     expected = id_to_string(expected, data_loader)
     sequence = id_to_string(sequence, data_loader)
     print("-" * 10 + "GT ({})".format("train" if train else "valid"))
@@ -218,12 +222,12 @@ def main(config_file, input_dir='images'):
 
     # Get data
     if input_dir == 'images':
-    transformed = transforms.Compose(
-        [
-            transforms.Resize((options.input_size.height, options.input_size.width)),
-            transforms.ToTensor(),
-        ]
-    )
+        transformed = transforms.Compose(
+            [
+                transforms.Resize((options.input_size.height, options.input_size.width)),
+                transforms.ToTensor(),
+            ]
+        )
     else: # 커스텀 이미지
         transformed = transforms.ToTensor()
     # dataset_loader가 DataLoader로 로드할때 Collate_fn을 통해 최대 길이만큼 -1을 채워져서 생성된다.
