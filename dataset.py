@@ -38,8 +38,8 @@ def load_vocab(tokens_paths):
     return token_to_id, id_to_token
 
 
-def split_gt(groundtruth, proportion=1.0, test_percent=None):
-    root = os.path.join(os.path.dirname(groundtruth), "images")
+def split_gt(groundtruth, proportion=1.0, test_percent=None, input_dir='images'):
+    root = os.path.join(os.path.dirname(groundtruth), input_dir) # 이미지 주소!!!
     with open(groundtruth, "r") as fd:
         data=[]
         for line in fd:
@@ -99,6 +99,7 @@ class LoadDataset(Dataset):
         crop=False,
         transform=None,
         rgb=3,
+        input_dir='images',
     ):
         """
         Args:
@@ -113,6 +114,7 @@ class LoadDataset(Dataset):
         self.crop = crop
         self.transform = transform
         self.rgb = rgb
+        self.input_dir = input_dir
         self.token_to_id, self.id_to_token = load_vocab(tokens_file)
         self.data = [
             {
@@ -142,11 +144,12 @@ class LoadDataset(Dataset):
         else:
             raise NotImplementedError
 
-        if self.crop:
-            # Image needs to be inverted because the bounding box cuts off black pixels,
-            # not white ones.
-            bounding_box = ImageOps.invert(image).getbbox()
-            image = image.crop(bounding_box)
+        # 현재 crop은 불필요
+        # if self.crop:
+        #     # Image needs to be inverted because the bounding box cuts off black pixels,
+        #     # not white ones.
+        #     bounding_box = ImageOps.invert(image).getbbox()
+        #     image = image.crop(bounding_box)
 
         if self.transform:
             image = self.transform(image)
@@ -220,7 +223,7 @@ class LoadEvalDataset(Dataset):
 
         return {"path": item["path"], "file_path":item["file_path"], "truth": item["truth"], "image": image}
 
-def dataset_loader(options, transformed):
+def dataset_loader(options, transformed, input_dir='images'):
 
     # Read data
     train_data, valid_data = [], [] 
@@ -229,7 +232,12 @@ def dataset_loader(options, transformed):
             prop = 1.0
             if len(options.data.dataset_proportions) > i:
                 prop = options.data.dataset_proportions[i]
-            train, valid = split_gt(path, prop, options.data.test_proportions)
+            train, valid = split_gt(
+                groundtruth=path,
+                proportion=prop,
+                test_percent=options.data.test_proportions,
+                input_dir=input_dir
+            )
             train_data += train
             valid_data += valid
     else:
@@ -237,14 +245,24 @@ def dataset_loader(options, transformed):
             prop = 1.0
             if len(options.data.dataset_proportions) > i:
                 prop = options.data.dataset_proportions[i]
-            train_data += split_gt(path, prop)
+            train_data += split_gt(
+                groundtruth=path,
+                proportion=prop,
+                test_percent=None,
+                input_dir=input_dir
+            )
         for i, path in enumerate(options.data.test):
-            valid = split_gt(path)
+            valid = split_gt(
+                groundtruth=path,
+                proportion=1.0,
+                test_percent=None,
+                input_dir=input_dir
+            )
             valid_data += valid
 
     # Load data
     train_dataset = LoadDataset(
-        train_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb
+        train_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb, input_dir=input_dir,
     )
     train_data_loader = DataLoader(
         train_dataset,
@@ -255,7 +273,7 @@ def dataset_loader(options, transformed):
     )
 
     valid_dataset = LoadDataset(
-        valid_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb
+        valid_data, options.data.token_paths, crop=options.data.crop, transform=transformed, rgb=options.data.rgb, input_dir=input_dir,
     )
     valid_data_loader = DataLoader(
         valid_dataset,

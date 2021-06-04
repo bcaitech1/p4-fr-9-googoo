@@ -159,7 +159,7 @@ def run_epoch(
     return result
 
 
-def main(config_file):
+def main(config_file, input_dir='images'):
     """
     Train math formula recognition model
     """
@@ -217,14 +217,17 @@ def main(config_file):
         )
 
     # Get data
+    if input_dir == 'images':
     transformed = transforms.Compose(
         [
-            # Resize so all images have the same size
             transforms.Resize((options.input_size.height, options.input_size.width)),
             transforms.ToTensor(),
         ]
     )
-    train_data_loader, validation_data_loader, train_dataset, valid_dataset = dataset_loader(options, transformed)
+    else: # 커스텀 이미지
+        transformed = transforms.ToTensor()
+    # dataset_loader가 DataLoader로 로드할때 Collate_fn을 통해 최대 길이만큼 -1을 채워져서 생성된다.
+    train_data_loader, validation_data_loader, train_dataset, valid_dataset = dataset_loader(options, transformed, input_dir)
     print(
         "[+] Data\n",
         "The number of train samples : {}\n".format(len(train_dataset)),
@@ -460,5 +463,13 @@ if __name__ == "__main__":
         type=str,
         help="Path of configuration file",
     )
+    parser.add_argument(
+        "-i",
+        "--input_dir",
+        dest="input_dir",
+        default="images",
+        type=str,
+        help="Path of input images",
+    )
     parser = parser.parse_args()
-    main(parser.config_file)
+    main(parser.config_file, input_dir=parser.input_dir)
