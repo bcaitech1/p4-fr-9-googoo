@@ -333,7 +333,7 @@ def main(config_file, input_dir='images'):
             criterion,
             optimizer,
             lr_scheduler,
-            options.teacher_forcing_ratio,
+            options.teacher_forcing_ratio if epoch >= teacher_forcing_epoch else 1.0, # train일때만 teacher_forcing_ratio 작동
             options.max_grad_norm,
             device,
             train=True,
@@ -366,7 +366,7 @@ def main(config_file, input_dir='images'):
             criterion,
             optimizer,
             lr_scheduler,
-            options.teacher_forcing_ratio,
+            options.teacher_forcing_ratio if epoch >= teacher_forcing_epoch else 1.0, # train일때만 teacher_forcing_ratio 작동
             options.max_grad_norm,
             device,
             train=False,
