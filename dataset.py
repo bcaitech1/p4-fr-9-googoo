@@ -38,20 +38,20 @@ def load_vocab(tokens_paths):
     return token_to_id, id_to_token
 
 
-def split_gt(groundtruth, proportion=1.0, test_percent=None, input_dir='images'):
+def split_gt(groundtruth, proportion=1.0, test_percent=None, input_dir='images'): # 데이터가 나눠지는 부분
     root = os.path.join(os.path.dirname(groundtruth), input_dir) # 이미지 주소!!!
-    with open(groundtruth, "r") as fd:
+    with open(groundtruth, "r") as fd: # gt.txt => train_00000.jpg latex => 구분자 \t
         data=[]
         for line in fd:
-            data.append(line.strip().split("\t"))
+            data.append(line.strip().split("\t")) # [file_name:str, latex:str] 
         random.shuffle(data)
-        dataset_len = round(len(data) * proportion)
+        dataset_len = round(len(data) * proportion) # 데이터 선택 % 반영 => 총 사용 할 데이터 갯수(train + val) => 둘을 나누는 것은 아래 test_percent
         data = data[:dataset_len]
-        data = [[os.path.join(root, x[0]), x[1]] for x in data]
+        data = [[os.path.join(root, x[0]), x[1]] for x in data] # [file_path, file_name, latex(gt)]
     
-    if test_percent:
+    if test_percent: # 데이터를 train < = > validation 용으로 나눔
         test_len = round(len(data) * test_percent)
-        return data[test_len:], data[:test_len]
+        return data[test_len:], data[:test_len] # for train, for validation
     else:
         return data
 
@@ -228,11 +228,11 @@ def dataset_loader(options, transformed, input_dir='images'):
     # Read data
     train_data, valid_data = [], [] 
     if options.data.random_split:
-        for i, path in enumerate(options.data.train):
+        for i, path in enumerate(options.data.train): # 지금은 "/opt/ml/input/data/train_dataset/gt.txt" 이것 하나지만, 늘릴 수 있음
             prop = 1.0
-            if len(options.data.dataset_proportions) > i:
+            if len(options.data.dataset_proportions) > i: # 가져올 비율
                 prop = options.data.dataset_proportions[i]
-            train, valid = split_gt(
+            train, valid = split_gt( # 데이터가 나눠지는 부분
                 groundtruth=path,
                 proportion=prop,
                 test_percent=options.data.test_proportions,
