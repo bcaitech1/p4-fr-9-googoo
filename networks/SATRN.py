@@ -609,7 +609,7 @@ class SATRN(nn.Module):
             layer_num=FLAGS.SATRN.decoder.layer_num,
         )
 
-        if FLAGS.loss = 'Label_Smoothing':
+        if FLAGS.loss == 'Label_Smoothing':
             self.criterion = (
                 LabelSmoothingLoss(label_smoothing=FLAGS.Label_Smoothing.label_smoothing, tgt_vocab_size=len(train_dataset.token_to_id), ignore_index=train_dataset.token_to_id[PAD])
             )
