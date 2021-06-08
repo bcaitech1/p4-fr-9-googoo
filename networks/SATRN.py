@@ -614,9 +614,9 @@ class SATRN(nn.Module):
                 LabelSmoothingLoss(label_smoothing=FLAGS.Label_Smoothing.label_smoothing, tgt_vocab_size=len(train_dataset.token_to_id), ignore_index=train_dataset.token_to_id[PAD])
             )
         else:    
-        self.criterion = (
-            nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD])
-        )  # without ignore_index=train_dataset.token_to_id[PAD]
+            self.criterion = (
+                nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD])
+            )  # without ignore_index=train_dataset.token_to_id[PAD]
 
         if checkpoint:
             self.load_state_dict(checkpoint)
