@@ -62,7 +62,7 @@ class TransitionBlock(nn.Module):
         """
         Args:
             input_size (int): Number of channels of the input
-            output_size (int): Number of channels of the output
+            output_size (int): Number of channels of the output. Normally it's (input size)//2.
         """
         super(TransitionBlock, self).__init__()
         self.norm = nn.BatchNorm2d(input_size)
@@ -185,7 +185,6 @@ class ScaledDotProductAttention(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, q, k, v, mask=None):
-        # pdb.set_trace() ######################################################################################################################
         attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
         if mask is not None:
             attn = attn.masked_fill(mask=mask, value=float("-inf"))
@@ -214,7 +213,6 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, q, k, v, mask=None):
-        # pdb.set_trace() ######################################################################################################################
         b, q_len, k_len, v_len = q.size(0), q.size(1), k.size(1), v.size(1)
         q = (
             self.q_linear(q)
@@ -263,6 +261,56 @@ class Feedforward(nn.Module):
     def forward(self, input):
         return self.layers(input)
 
+class LocalityAwareFeedforward(nn.Module):
+    def __init__(self, filter_size=2048, hidden_dim=512):
+        super().__init__()
+        #point-wise conv(1x1 conv)
+        self.ps_conv1 = nn.Sequential(nn.Conv2d(in_channels = hidden_dim, 
+                                                out_channels = filter_size,
+                                                kernel_size = 1,
+                                                stride = 1,
+                                                padding = 0,
+                                                bias = False,
+                                                ),
+                                       nn.BatchNorm2d(filter_size),
+                                       nn.ReLU(inplace=True))
+        # depth-wise
+        self.dw_conv = nn.Sequential(nn.Conv2d(in_channels = filter_size, 
+                                               out_channels = filter_size,
+                                               kernel_size = 3,
+                                               stride = 1,
+                                               padding = 1,
+                                               bias = False,
+                                               groups = filter_size,
+                                               ),
+                                     nn.BatchNorm2d(filter_size),
+                                     nn.ReLU(inplace=True))     
+        self.ps_conv2 = nn.Sequential(nn.Conv2d(in_channels = filter_size, 
+                                                 out_channels = hidden_dim,
+                                                 kernel_size = 1,
+                                                 stride = 1,
+                                                 padding = 0,
+                                                 bias = False,
+                                                 ),
+                                       nn.BatchNorm2d(hidden_dim),
+                                       nn.ReLU(inplace=True))                         
+
+    def forward(self, x, shape):
+        '''
+        Args:
+            x (Tensor): shape (batch_size, H*W, C).
+            shape : shape of input before reshape. (batch_size, C, H, W).
+        '''
+        x = x.transpose(-1,-2).reshape(*shape).contiguous() # shape (batch_size, C, H, W)
+        
+        x = self.ps_conv1(x) # shape (batch_size, filter_size, H, W)
+        x = self.dw_conv(x) # shape (batch_size, filter_size, H, W)
+        x = self.ps_conv2(x) # shape (batch_size, C, H, W)
+
+        b, c, h, w = shape
+        x = x.reshape(b, c, h*w).transpose(-1, -2) # shape (batch_size, H*W, C).
+        return x
+
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(self, input_size, filter_size, head_num, dropout_rate=0.2):
@@ -275,18 +323,27 @@ class TransformerEncoderLayer(nn.Module):
             dropout=dropout_rate,
         )
         self.attention_norm = nn.LayerNorm(normalized_shape=input_size)
-        self.feedforward_layer = Feedforward(
+        # self.feedforward_layer = Feedforward(
+        #     filter_size=filter_size, hidden_dim=input_size
+        # )
+        self.feedforward_layer = LocalityAwareFeedforward(
             filter_size=filter_size, hidden_dim=input_size
         )
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
-    def forward(self, input):
-        # pdb.set_trace() ######################################################################################################################
-        att = self.attention_layer(input, input, input)
-        out = self.attention_norm(att + input)
+    def forward(self, input, shape):
+        '''
+        Args:
+            input (tensor): shape (batch_size, W*H, C)
+            shape : shape of input before reshape. (batch_size, C, H, W)
+        '''
+        att = self.attention_layer(input, input, input) # shape (batch_size, W*H, C)
+        out = self.attention_norm(att + input) # shape (batch_size, W*H, C)
 
-        ff = self.feedforward_layer(out)
-        out = self.feedforward_norm(ff + out)
+        # ff = self.feedforward_layer(out)
+        ff = self.feedforward_layer(out, shape) # shape (batch_size, W*H, C)
+        out = self.feedforward_norm(ff + out) # shape (batch_size, W*H, C)
+
         return out
 
 
@@ -313,7 +370,6 @@ class PositionalEncoding2D(nn.Module):
 
     def forward(self, input):
         ### Require DEBUG
-        # pdb.set_trace() ######################################################################################################################
         b, c, h, w = input.size()
         h_pos_encoding = (
             self.h_position_encoder[:h, :].unsqueeze(1).to(input.get_device())
@@ -396,17 +452,16 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         Args:
             input (Tensor): input image Tensor. shape (batch_size, C, H, W)
         '''
-        # pdb.set_trace() ######################################################################################################################
         out = self.shallow_cnn(input)  # shape (batch_size, 300, 16, 16)
-
         out = self.positional_encoding(out)  # [b, c, h, w]
 
         # flatten
-        b, c, h, w = out.size()
+        shape = out.size()
+        b, c, h, w = shape
         out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
 
         for layer in self.attention_layers:
-            out = layer(out)
+            out = layer(out, shape)
         return out
 
 
@@ -436,12 +491,12 @@ class TransformerDecoderLayer(nn.Module):
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
     def forward(self, tgt, tgt_prev, src, tgt_mask):
-        # pdb.set_trace() ######################################################################################################################
         if tgt_prev == None:  # Train
             att = self.self_attention_layer(tgt, tgt, tgt, tgt_mask)
             out = self.self_attention_norm(att + tgt)
 
-            att = self.attention_layer(tgt, src, src)
+            # att = self.attention_layer(tgt, src, src)
+            att = self.attention_layer(out, src, src)
             out = self.attention_norm(att + out)
 
             ff = self.feedforward_layer(out)
@@ -451,7 +506,8 @@ class TransformerDecoderLayer(nn.Module):
             att = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask)
             out = self.self_attention_norm(att + tgt)
 
-            att = self.attention_layer(tgt, src, src)
+            # att = self.attention_layer(tgt, src, src)
+            att = self.attention_layer(out, src, src)
             out = self.attention_norm(att + out)
 
             ff = self.feedforward_layer(out)
@@ -480,7 +536,6 @@ class PositionEncoder1D(nn.Module):
         return position_encoder
 
     def forward(self, x, point=-1):
-        # pdb.set_trace() ######################################################################################################################
         if point == -1:
             out = x + self.position_encoder[:, : x.size(1), :].to(x.get_device())
             out = self.dropout(out)
@@ -552,7 +607,6 @@ class TransformerDecoder(nn.Module):
     def forward(
         self, src, text, is_train=True, batch_max_length=50, teacher_forcing_ratio=1.0
     ):
-        # pdb.set_trace() ######################################################################################################################
         if is_train and random.random() < teacher_forcing_ratio:
             tgt = self.text_embedding(text)
             tgt = self.pos_encoder(tgt)
@@ -615,8 +669,8 @@ class SATRN(nn.Module):
         )
 
         self.criterion = (
-            nn.CrossEntropyLoss()
-        )  # without ignore_index=train_dataset.token_to_id[PAD]
+            nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD]) # ignore_index=train_dataset.token_to_id[PAD]
+        )  
 
         if checkpoint:
             self.load_state_dict(checkpoint)
@@ -629,7 +683,6 @@ class SATRN(nn.Module):
             is_train (Bool)
             teacher_forcing_ratio (float)
         '''
-        # pdb.set_trace() ######################################################################################################################
 
         enc_result = self.encoder(input)
         dec_result = self.decoder(
