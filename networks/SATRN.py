@@ -376,7 +376,7 @@ class TransformerEncoderLayer(nn.Module):
 
 #         return out
 class PositionalEncoding2D(nn.Module):
-    def __init__(self, in_channels, max_h=64, max_w=128, dropout=0.1):
+    def __init__(self, in_channels, max_h=64, max_w=256, dropout=0.1):
         super(PositionalEncoding2D, self).__init__()
 
         h_position_encoder = self.generate_encoder(in_channels, max_h)
