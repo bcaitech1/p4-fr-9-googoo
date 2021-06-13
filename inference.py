@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader
 import argparse
 import random
 from tqdm import tqdm
+import albumentations as A
+from albumentations.pytorch.transforms import ToTensorV2
 
 
 def main(parser):
@@ -36,10 +38,10 @@ def main(parser):
         )
     print(options.input_size.height)
 
-    transformed = transforms.Compose(
+    transformed = A.Compose(
         [
-            transforms.Resize((options.input_size.height, options.input_size.width)),
-            transforms.ToTensor(),
+            A.Resize(always_apply=True, p=1.0, height=options.input_size.height, width=options.input_size.width),
+            ToTensorV2(),
         ]
     )
 
