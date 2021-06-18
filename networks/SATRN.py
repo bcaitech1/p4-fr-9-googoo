@@ -181,17 +181,19 @@ class ScaledDotProductAttention(nn.Module):
     def __init__(self, temperature, dropout=0.1):
         super(ScaledDotProductAttention, self).__init__()
 
-        self.temperature = temperature
+        self.temperature = temperature 
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, q, k, v, mask=None):
-        attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
+    def forward(self, q, k, mask=None, enc_dec=False):
+        if enc_dec:
+            attn = torch.matmul(q, k.transpose(2, 3)) / self.temperature
+        else:
+            attn = torch.matmul(q, k.transpose(2, 3)) / ((2**0.5)*self.temperature) # multiply 2**0.5 for separate positional encoding
+
         if mask is not None:
             attn = attn.masked_fill(mask=mask, value=float("-inf"))
-        attn = torch.softmax(attn, dim=-1)
-        attn = self.dropout(attn)
-        out = torch.matmul(attn, v)
-        return out, attn
+        
+        return attn
 
 
 class MultiHeadAttention(nn.Module):
@@ -212,7 +214,7 @@ class MultiHeadAttention(nn.Module):
         self.out_linear = nn.Linear(self.head_num * self.head_dim, q_channels)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, q, k, v, mask=None):
+    def forward(self, q, k, v, position=None, mask=None):
         b, q_len, k_len, v_len = q.size(0), q.size(1), k.size(1), v.size(1)
         q = (
             self.q_linear(q)
@@ -232,8 +234,17 @@ class MultiHeadAttention(nn.Module):
 
         if mask is not None:
             mask = mask.unsqueeze(1)
+            if position is not None:
+                position = position.masked_fill(mask=mask, value=float("-inf"))
+        if position is not None:
+            attn = self.attention(q, k, mask=mask) + position
+        else:
+            attn = self.attention(q, k, mask=mask, enc_dec=True)
+        attn = torch.softmax(attn, dim=-1)
 
-        out, attn = self.attention(q, k, v, mask=mask)
+        out = torch.matmul(attn, v)
+
+
         out = (
             out.transpose(1, 2)
             .contiguous()
@@ -241,7 +252,7 @@ class MultiHeadAttention(nn.Module):
         )
         out = self.out_linear(out)
         out = self.dropout(out)
-
+        
         return out
 
 
@@ -311,10 +322,63 @@ class LocalityAwareFeedforward(nn.Module):
         x = x.reshape(b, c, h*w).transpose(-1, -2) # shape (batch_size, H*W, C).
         return x
 
+class Flatten(nn.Module):
+    def forward(self, x):
+        '''
+        Args:
+            x (Tensor): shape (batch_size, C, 1, 1)
+        Returns:
+            (Tensor): shape (batch_size, C)
+        '''
+        return x.view(x.size(0), -1)
+
+class ChannelGate(nn.Module):
+    def __init__(self, gate_channels, reduction_ratio=8, pool_types=['avg', 'max']):
+        super(ChannelGate, self).__init__()
+        self.gate_channels = gate_channels
+        self.mlp = nn.Sequential(
+            Flatten(),
+            nn.Linear(gate_channels, gate_channels // reduction_ratio),
+            nn.ReLU(),
+            nn.Linear(gate_channels // reduction_ratio, gate_channels)
+            )
+        self.pool_types = pool_types
+
+    def forward(self, x, shape):
+        '''
+        Args:
+            x (Tensor): shape (batch_size, H*W, C).
+            shape : shape of input before reshape. (batch_size, C, H, W).
+        '''
+        residual = x.clone()
+        x = x.transpose(-1,-2).reshape(*shape).contiguous() # shape (batch_size, C, H, W)
+
+        channel_att_sum = None
+        for pool_type in self.pool_types:
+            if pool_type=='avg':
+                avg_pool = F.avg_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3))) ## global max pool. shape (batch, C, 1, 1)
+                channel_att_raw = self.mlp( avg_pool ) # shape (batch_size, C)
+            elif pool_type=='max':
+                max_pool = F.max_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3))) ## global avg pool. shape (batch, C, 1, 1)
+                channel_att_raw = self.mlp( max_pool ) # shape (batch_size, C)
+
+            if channel_att_sum is None:
+                channel_att_sum = channel_att_raw
+            else:
+                channel_att_sum = channel_att_sum + channel_att_raw
+
+        scale = F.sigmoid( channel_att_sum ).unsqueeze(2).unsqueeze(3).expand_as(x) # shape (batch_size, C, H, W)
+        x = x * scale
+
+        b, c, h, w = shape
+        x = x.reshape(b, c, h*w).transpose(-1, -2) # shape (batch_size, H*W, C).
+
+        return x + residual
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(self, input_size, filter_size, head_num, dropout_rate=0.2):
         super(TransformerEncoderLayer, self).__init__()
+        self.channel_gate = ChannelGate(input_size)
 
         self.attention_layer = MultiHeadAttention(
             q_channels=input_size,
@@ -323,21 +387,20 @@ class TransformerEncoderLayer(nn.Module):
             dropout=dropout_rate,
         )
         self.attention_norm = nn.LayerNorm(normalized_shape=input_size)
-        # self.feedforward_layer = Feedforward(
-        #     filter_size=filter_size, hidden_dim=input_size
-        # )
         self.feedforward_layer = LocalityAwareFeedforward(
             filter_size=filter_size, hidden_dim=input_size
         )
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
-    def forward(self, input, shape):
+    def forward(self, input, shape, position = None):
         '''
         Args:
             input (tensor): shape (batch_size, W*H, C)
             shape : shape of input before reshape. (batch_size, C, H, W)
         '''
-        att = self.attention_layer(input, input, input) # shape (batch_size, W*H, C)
+        input = self.channel_gate(input, shape) # shape (batch_size, W*H, C)
+
+        att = self.attention_layer(input, input, input, position=position) # shape (batch_size, W*H, C)
         out = self.attention_norm(att + input) # shape (batch_size, W*H, C)
 
         # ff = self.feedforward_layer(out)
@@ -394,8 +457,9 @@ class PositionalEncoding2D(nn.Module):
 
         pos_encoding = pos_encoding.permute(2, 0, 1)  # [2*D, H, W]
 
-        out = input + pos_encoding.unsqueeze(0)
-        out = self.dropout(out)
+        out = pos_encoding.unsqueeze(0) # shape (1, c, h, w)
+        # out = input + pos_encoding.unsqueeze(0)
+        # out = self.dropout(out)
 
         return out
 
@@ -430,6 +494,8 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             
         '''
         super(TransformerEncoderFor2DFeatures, self).__init__()
+        self.head_num = head_num
+        self.head_dim = hidden_dim // head_num
 
         self.shallow_cnn = DeepCNN300(
             input_size,
@@ -438,6 +504,10 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             dropout_rate=dropout_rate,
         )
         self.positional_encoding = PositionalEncoding2D(hidden_dim)
+        self.scaled_dot_pro_position = ScaledDotProductAttention((self.head_dim * self.head_num)**0.5, dropout_rate)
+        self.pos_q_linear = nn.Linear(hidden_dim, self.head_num * self.head_dim)
+        self.pos_k_linear = nn.Linear(hidden_dim, self.head_num * self.head_dim)
+
         self.attention_layers = nn.ModuleList(
             [
                 TransformerEncoderLayer(hidden_dim, filter_size, head_num, dropout_rate)
@@ -453,15 +523,35 @@ class TransformerEncoderFor2DFeatures(nn.Module):
             input (Tensor): input image Tensor. shape (batch_size, C, H, W)
         '''
         out = self.shallow_cnn(input)  # shape (batch_size, 300, 16, 16)
-        out = self.positional_encoding(out)  # [b, c, h, w]
+        position = self.positional_encoding(out)  # shape (1, 300, 16, 16)
 
         # flatten
         shape = out.size()
         b, c, h, w = shape
         out = out.view(b, c, h * w).transpose(1, 2)  # [b, h x w, c]
 
+        position = position.view(1, c, h * w).transpose(1,2).contiguous() # shape (1, h x w, c)
+        pos_q = (
+            self.pos_q_linear(position)
+            .view(1, h * w, self.head_num, self.head_dim)
+            .transpose(1, 2).contiguous()
+        ) # shape (1, head_num, h x w, head_dim)
+        pos_k = (
+            self.pos_k_linear(position)
+            .view(1, h * w, self.head_num, self.head_dim)
+            .transpose(1, 2).contiguous()
+        ) # shape (1, head_num, h x w, head_dim)
+        position = self.scaled_dot_pro_position(pos_q, pos_k) # shape (1, head_num, h x w, h x w)
+
+
+        # for l, layer in enumerate(self.attention_layers):
+        #     if l == 0:
+        #         out = layer(out, shape, position)
+        #     else:
+        #         out = layer(out, shape)
         for layer in self.attention_layers:
-            out = layer(out, shape)
+                out = layer(out, shape, position)
+
         return out
 
 
@@ -490,12 +580,12 @@ class TransformerDecoderLayer(nn.Module):
         )
         self.feedforward_norm = nn.LayerNorm(normalized_shape=input_size)
 
-    def forward(self, tgt, tgt_prev, src, tgt_mask):
+    def forward(self, tgt, tgt_prev, src, tgt_mask, position = None):
+        
         if tgt_prev == None:  # Train
-            att = self.self_attention_layer(tgt, tgt, tgt, tgt_mask)
+            att = self.self_attention_layer(tgt, tgt, tgt, position=position, mask=tgt_mask)
             out = self.self_attention_norm(att + tgt)
 
-            # att = self.attention_layer(tgt, src, src)
             att = self.attention_layer(out, src, src)
             out = self.attention_norm(att + out)
 
@@ -503,10 +593,9 @@ class TransformerDecoderLayer(nn.Module):
             out = self.feedforward_norm(ff + out)
         else:
             tgt_prev = torch.cat([tgt_prev, tgt], 1)
-            att = self.self_attention_layer(tgt, tgt_prev, tgt_prev, tgt_mask)
+            att = self.self_attention_layer(tgt, tgt_prev, tgt_prev, position=position, mask=tgt_mask)
             out = self.self_attention_norm(att + tgt)
 
-            # att = self.attention_layer(tgt, src, src)
             att = self.attention_layer(out, src, src)
             out = self.attention_norm(att + out)
 
@@ -538,7 +627,7 @@ class PositionEncoder1D(nn.Module):
     def forward(self, x, point=-1):
         if point == -1:
             out = x + self.position_encoder[:, : x.size(1), :].to(x.get_device())
-            out = self.dropout(out)
+            # out = self.dropout(out)
         else:
             out = x + self.position_encoder[:, point, :].unsqueeze(1).to(x.get_device())
         return out
