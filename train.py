@@ -201,7 +201,7 @@ def main(config_file):
     ##################################################################################################################################
     # wandb setting
     wandb.init(project="OCR", reinit=True)
-    wandb.run.name = 'Satrn_with_wandb_rotate_1'
+    wandb.run.name = 'Satrn_nothing_1'
     wandb.run.save()
     ##################################################################################################################################
 
@@ -238,13 +238,18 @@ def main(config_file):
     transformed = {"train":A.Compose(
             [
                 # Resize so all images have the same size
-                A.Rotate(always_apply=True, p=1.0, limit=(-20, 20), interpolation=4, border_mode=1, value=(0, 0, 0), mask_value=None),
+                # A.RandomContrast(always_apply=True, p=1.0, limit=(-0.5, 0.5)),
+                # A.CLAHE(always_apply=True, p=1.0, clip_limit=(4, 4), tile_grid_size=(8, 8)),
+                A.ShiftScaleRotate(always_apply=True, p=1.0, shift_limit=(0.0, 0.0), scale_limit=(-0.2, -0.2),
+                                rotate_limit=(-10, 10), interpolation=4, border_mode=1, value=(0, 0, 0), mask_value=None),
                 A.Resize(always_apply=True, p=1.0, height=options.input_size.height, width=options.input_size.width),
                 ToTensorV2(),
             ]
         ), "validation":A.Compose(
             [
                 # Resize so all images have the same size
+                A.ShiftScaleRotate(always_apply=True, p=1.0, shift_limit=(0.0, 0.0), scale_limit=(-0.2, -0.2),
+                                rotate_limit=(0, 0), interpolation=4, border_mode=1, value=(0, 0, 0), mask_value=None),
                 A.Resize(always_apply=True, p=1.0, height=options.input_size.height, width=options.input_size.width),
                 ToTensorV2(),
             ]
@@ -332,7 +337,7 @@ def main(config_file):
     # Log
     if not os.path.exists(options.prefix):
         os.makedirs(options.prefix)
-    log_file = open(os.path.join(options.prefix, "log.txt"), "w")
+    log_file = open(os.path.join(options.prefix, "log4_normal.txt"), "w")
     shutil.copy(config_file, os.path.join(options.prefix, "train_config.yaml"))
     if options.print_epochs is None:
         options.print_epochs = options.num_epochs
