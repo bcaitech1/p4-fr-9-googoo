@@ -1,7 +1,7 @@
 network: SATRN
 input_size:
-  height: 64
-  width: 256
+  height: 80
+  width: 320
 SATRN:
   encoder:
     hidden_dim: 300
