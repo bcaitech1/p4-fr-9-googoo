@@ -32,11 +32,11 @@ class BottleneckBlock(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.conv1 = nn.Conv2d(
             input_size, inter_size, kernel_size=1, stride=1, bias=False
-        ) ## inter_size 만큼 채널 수를 늘린다.즉 기존 input의 채널 수에 growth_rate수 만큼 채널수를 더 추가함.
+        ) 
         self.norm2 = nn.BatchNorm2d(inter_size)
         self.conv2 = nn.Conv2d(
             inter_size, growth_rate, kernel_size=3, stride=1, padding=1, bias=False
-        ) ## 다시 채널 수를 줄인다. growth_rate로 줄임.
+        ) 
         self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):
@@ -47,7 +47,7 @@ class BottleneckBlock(nn.Module):
         out = self.conv1(self.relu(self.norm1(x))) # shape (batch_size, C + growth_rate, H, W)
         out = self.conv2(self.relu(self.norm2(out))) # shape (batch_size, growth_rate, H, W)
         out = self.dropout(out)
-        return torch.cat([x, out], 1) # shape (batch_size, C+growth_rate, H, W). 기존 채널에 새로 뽑은 채널을 concat 해준다. 새로 뽑은 feature를 더해주고 있음.
+        return torch.cat([x, out], 1) # shape (batch_size, C+growth_rate, H, W). 
 
 
 class TransitionBlock(nn.Module):
@@ -275,7 +275,7 @@ class Feedforward(nn.Module):
 class LocalityAwareFeedforward(nn.Module):
     def __init__(self, filter_size=2048, hidden_dim=512):
         super().__init__()
-        #point-wise conv(1x1 conv)
+        # point-wise conv(1x1 conv)
         self.ps_conv1 = nn.Sequential(nn.Conv2d(in_channels = hidden_dim, 
                                                 out_channels = filter_size,
                                                 kernel_size = 1,
@@ -296,6 +296,7 @@ class LocalityAwareFeedforward(nn.Module):
                                                ),
                                      nn.BatchNorm2d(filter_size),
                                      nn.ReLU(inplace=True))     
+        # point-wise conv(1x1 conv)                             
         self.ps_conv2 = nn.Sequential(nn.Conv2d(in_channels = filter_size, 
                                                  out_channels = hidden_dim,
                                                  kernel_size = 1,
@@ -311,6 +312,8 @@ class LocalityAwareFeedforward(nn.Module):
         Args:
             x (Tensor): shape (batch_size, H*W, C).
             shape : shape of input before reshape. (batch_size, C, H, W).
+        Returns:
+            x (Tensor): shape (batch_size, H*W, C)
         '''
         x = x.transpose(-1,-2).reshape(*shape).contiguous() # shape (batch_size, C, H, W)
         
@@ -349,6 +352,8 @@ class ChannelGate(nn.Module):
         Args:
             x (Tensor): shape (batch_size, H*W, C).
             shape : shape of input before reshape. (batch_size, C, H, W).
+        Returns:
+            (Tensor): shape (batch_size, H*W, C).
         '''
         residual = x.clone()
         x = x.transpose(-1,-2).reshape(*shape).contiguous() # shape (batch_size, C, H, W)
@@ -397,13 +402,14 @@ class TransformerEncoderLayer(nn.Module):
         Args:
             input (tensor): shape (batch_size, W*H, C)
             shape : shape of input before reshape. (batch_size, C, H, W)
+        Returns:
+            out (Tensor): shape (batch_size, W*H, C)
         '''
         input = self.channel_gate(input, shape) # shape (batch_size, W*H, C)
 
         att = self.attention_layer(input, input, input, position=position) # shape (batch_size, W*H, C)
         out = self.attention_norm(att + input) # shape (batch_size, W*H, C)
 
-        # ff = self.feedforward_layer(out)
         ff = self.feedforward_layer(out, shape) # shape (batch_size, W*H, C)
         out = self.feedforward_norm(ff + out) # shape (batch_size, W*H, C)
 
@@ -432,7 +438,12 @@ class PositionalEncoding2D(nn.Module):
         return position_encoder  # (Max_len, In_channel)
 
     def forward(self, input):
-        ### Require DEBUG
+        '''
+        Args:
+            input (Tensor): output of shallow CNN
+        Returns:
+            out (Tensor): 2D positional encoding Tensor
+        '''
         b, c, h, w = input.size()
         h_pos_encoding = (
             self.h_position_encoder[:h, :].unsqueeze(1).to(input.get_device())
@@ -458,8 +469,7 @@ class PositionalEncoding2D(nn.Module):
         pos_encoding = pos_encoding.permute(2, 0, 1)  # [2*D, H, W]
 
         out = pos_encoding.unsqueeze(0) # shape (1, c, h, w)
-        # out = input + pos_encoding.unsqueeze(0)
-        # out = self.dropout(out)
+
 
         return out
 
@@ -484,13 +494,13 @@ class TransformerEncoderFor2DFeatures(nn.Module):
     ):
         '''
         Args:
-            input_size
-            hidden_dim
+            input_size (Int) : number of channel. 3 for rgb, 1 for grey.
+            hidden_dim (Int) : size of hidden dimension.
             filter_size (Int): intermediate layer size of feedforward layer.
-            head_num
-            layer_num
-            dropout_rate=0.1
-            checkpoint=None
+            head_num (Int) : number of attention heads
+            layer_num (Int) : number of encodie layers.
+            dropout_rate (Int)
+            checkpoint (Str) : checkpoint file path if not None.
             
         '''
         super(TransformerEncoderFor2DFeatures, self).__init__()
@@ -543,14 +553,8 @@ class TransformerEncoderFor2DFeatures(nn.Module):
         ) # shape (1, head_num, h x w, head_dim)
         position = self.scaled_dot_pro_position(pos_q, pos_k) # shape (1, head_num, h x w, h x w)
 
-
-        # for l, layer in enumerate(self.attention_layers):
-        #     if l == 0:
-        #         out = layer(out, shape, position)
-        #     else:
-        #         out = layer(out, shape)
         for layer in self.attention_layers:
-                out = layer(out, shape, position)
+            out = layer(out, shape, position)
 
         return out
 
@@ -627,7 +631,6 @@ class PositionEncoder1D(nn.Module):
     def forward(self, x, point=-1):
         if point == -1:
             out = x + self.position_encoder[:, : x.size(1), :].to(x.get_device())
-            # out = self.dropout(out)
         else:
             out = x + self.position_encoder[:, point, :].unsqueeze(1).to(x.get_device())
         return out
