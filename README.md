@@ -86,7 +86,7 @@ Attention:
   cell_type: LSTM or GRU
 checkpoint: file path of checkpoint
 prefix: "./log/satrn"
-version: '_v21'
+version: ''
 
 data:
   train:
