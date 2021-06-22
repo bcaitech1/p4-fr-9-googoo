@@ -1,0 +1,1 @@
+[1/1] Epoch 1: Train Symbol Accuracy = 0.06441, Train Sentence Accuracy = 0.00000, Train WER = 0.84230, Train Loss = 1.20148, Validation Symbol Accuracy = 0.07278, Validation Sentence Accuracy = 0.00000, Validation WER = 0.79104, Validation Loss = 0.94943, lr = 5e-05 (time elapsed 00:08:51)

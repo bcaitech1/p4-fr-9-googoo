@@ -1,4 +1,5 @@
-/log
+/log/*/checkpoints/
+/log/*/tensorboard/
 /submit
 .ipynb_checkpoints/
 *.cpython-37.pyc
