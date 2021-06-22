@@ -1,0 +1,1 @@
+python resize.py -d 256,64 -s rotated/images -o rotated_256_64

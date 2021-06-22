@@ -8,37 +8,107 @@ import random
 from dataset import START, PAD
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+'''
 
-# https://github.com/OpenNMT/OpenNMT-py/blob/e8622eb5c6117269bb3accd8eb6f66282b5e67d9/onmt/utils/loss.py#L186
-class LabelSmoothingLoss(nn.Module):
-    """
-    With label smoothing,
-    KL-divergence between q_{smoothed ground truth prob.}(w)
-    and p_{prob. computed by model}(w) is minimized.
-    """
-    def __init__(self, label_smoothing, tgt_vocab_size, ignore_index=-100):
-        assert 0.0 < label_smoothing <= 1.0
+from torch.nn.modules.loss import _WeightedLoss
+
+
+# class LabelSmoothingCrossEntropy(nn.Module):
+#     def __init__(self):
+#         super(LabelSmoothingCrossEntropy, self).__init__()
+#     def forward(self, x, target, smoothing=0.1):
+#         confidence = 1. - smoothing
+#         logprobs = F.log_softmax(x, dim=-1)
+#         nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+#         nll_loss = nll_loss.squeeze(1)
+#         smooth_loss = -logprobs.mean(dim=-1)
+#         loss = confidence * nll_loss + smoothing * smooth_loss
+#         return loss.mean()
+
+
+# Maihon 버전 커스텀
+class LabelSmoothingCrossEntropy(_WeightedLoss):
+    def __init__(self, weight=None, reduction='mean', smoothing=0.1, ignore_index=-100, num_classes=245):
+        super().__init__(weight=weight, reduction=reduction)
+        self.smoothing = smoothing
+        self.weight = weight
+        self.reduction = reduction
         self.ignore_index = ignore_index
-        super(LabelSmoothingLoss, self).__init__()
+        self.num_classes = num_classes
 
-        smoothing_value = label_smoothing / (tgt_vocab_size - 2)
-        one_hot = torch.full((tgt_vocab_size,), smoothing_value)
-        one_hot[self.ignore_index] = 0
-        self.register_buffer('one_hot', one_hot.unsqueeze(0))
+    @staticmethod
+    def _smooth_one_hot(targets: torch.Tensor, n_classes: int, smoothing=0.0, ignore_index=-100):
+        assert 0 <= smoothing < 1
+        # targets: [36, 94] batch x # of sentence
+        with torch.no_grad():
+            targets = torch.empty(size=(targets.size(0), n_classes, targets.size(1)),
+                                  device=targets.device) \
+                .fill_(smoothing / (n_classes - 1)) \
+                .scatter_(-1, targets.data.unsqueeze(1), 1. - smoothing) # dim=-1로 수정
+                
+        # print(targets[0].shape, targets[0]) # [94, 245] => sentence, token
+        print(targets[0][0].shape, targets[0][0]) # [245] => token => 1개만 1.
+        # print(targets[0][0][0])
+        # print(targets.shape, targets) # 36, 245, 04 => batch, token, sentence
+#             one_hot_smooth = torch.full((targets.size(1), n_classes,), smoothing / (n_classes-2), device=device) # size 만큼 smoothing_value로 채우기
+#             if ignore_index != -100:
+#                 one_hot_smooth[ignore_index] = 0.0 # pad
+#             one_hot_smooth = one_hot_smooth.repeat(targets.size(0), 1)
+#             one_hot_smooth = one_hot_smooth.scatter(-1, targets.unsqueeze(-1), 1.  - smoothing)
+        return targets
+    
+    def forward(self, inputs, targets): # batch, sentence_size, num_classes
+        # print('inputs', inputs.shape) # [36, 245, 94] : batch x # of tokens x # of sentence
+        # print('targets', targets.shape) # [36, 94] batch x # of sentence
+        # print('self.num_classes', self.num_classes)
+        targets = LabelSmoothingCrossEntropy._smooth_one_hot(targets, self.num_classes, self.smoothing, self.ignore_index) # inputs.size(-1)
+        lsm = F.log_softmax(inputs, -1)
+        # print('after targets', targets.shape) # 36 94 245 => batch x sentence x token
+        # print('lsm', lsm.shape) # 36 245 94 => batch x token x sentence
+        # print(targets.shape, lsm.shape)
+        # print(targets, lsm) 
+        if self.weight is not None:
+            lsm = lsm * self.weight.unsqueeze(0)
+        # torch.reshape(targets, (targets.size(0), targets.size(2), targets.size(1))) 
+        loss = -(targets * lsm).sum(-1)
 
-        self.confidence = 1.0 - label_smoothing
+        if self.reduction == 'sum':
+            loss = loss.sum()
+        elif self.reduction == 'mean':
+            loss = loss.mean()
+        return loss
 
-    def forward(self, output, target):
-        """
-        output (FloatTensor): batch_size x n_classes
-        target (LongTensor): batch_size
-        """
-        model_prob = self.one_hot.repeat(target.size(0), 1)
-        model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
-        model_prob.masked_fill_((target == self.ignore_index).unsqueeze(1), 0)
+# # https://github.com/OpenNMT/OpenNMT-py/blob/e8622eb5c6117269bb3accd8eb6f66282b5e67d9/onmt/utils/loss.py#L186
+# class LabelSmoothingLoss(nn.Module):
+#     """
+#     With label smoothing,
+#     KL-divergence between q_{smoothed ground truth prob.}(w)
+#     and p_{prob. computed by model}(w) is minimized.
+#     """
+#     def __init__(self, label_smoothing, tgt_vocab_size, ignore_index=-100):
+#         assert 0.0 < label_smoothing <= 1.0
+#         self.ignore_index = ignore_index
+#         super(LabelSmoothingLoss, self).__init__()
 
-        return F.kl_div(output, model_prob, reduction='sum')
+#         smoothing_value = label_smoothing / (tgt_vocab_size - 2)
+#         one_hot = torch.full((tgt_vocab_size,), smoothing_value)
+#         one_hot[self.ignore_index] = 0
+#         self.register_buffer('one_hot', one_hot.unsqueeze(0))
 
+#         self.confidence = 1.0 - label_smoothing
+
+#     def forward(self, output, target):
+#         """
+#         output (FloatTensor): batch_size x n_classes
+#         target (LongTensor): batch_size
+#         """
+#         model_prob = self.one_hot.repeat(target.size(0), 1)
+#         model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
+#         model_prob.masked_fill_((target == self.ignore_index).unsqueeze(1), 0)
+
+#         return F.kl_div(output, model_prob, reduction='sum')
+
+'''
 class BottleneckBlock(nn.Module):
     """
     Dense Bottleneck Block
@@ -609,14 +679,20 @@ class SATRN(nn.Module):
             layer_num=FLAGS.SATRN.decoder.layer_num,
         )
 
-        if FLAGS.loss == 'Label_Smoothing':
-            self.criterion = (
-                LabelSmoothingLoss(label_smoothing=FLAGS.Label_Smoothing.label_smoothing, tgt_vocab_size=len(train_dataset.token_to_id), ignore_index=train_dataset.token_to_id[PAD])
-            )
-        else:    
-            self.criterion = (
-                nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD])
-            )  # without ignore_index=train_dataset.token_to_id[PAD]
+#         if FLAGS.loss == 'Label_Smoothing':
+#             self.criterion = (
+#                 LabelSmoothingCrossEntropy(
+#                     weight=None,
+#                     reduction='mean',
+#                     smoothing=FLAGS.Label_Smoothing.label_smoothing,
+#                     ignore_index=train_dataset.token_to_id[PAD],
+#                     num_classes=len(train_dataset.id_to_token),
+#                 )
+#             )
+#         else:    
+        self.criterion = (
+            nn.CrossEntropyLoss(ignore_index=train_dataset.token_to_id[PAD])
+        )  # without ignore_index=train_dataset.token_to_id[PAD]
 
         if checkpoint:
             self.load_state_dict(checkpoint)

@@ -212,11 +212,11 @@ class LoadEvalDataset(Dataset):
         else:
             raise NotImplementedError
 
-        if self.crop:
-            # Image needs to be inverted because the bounding box cuts off black pixels,
-            # not white ones.
-            bounding_box = ImageOps.invert(image).getbbox()
-            image = image.crop(bounding_box)
+#         if self.crop:
+#             # Image needs to be inverted because the bounding box cuts off black pixels,
+#             # not white ones.
+#             bounding_box = ImageOps.invert(image).getbbox()
+#             image = image.crop(bounding_box)
 
         if self.transform:
             image = self.transform(image)

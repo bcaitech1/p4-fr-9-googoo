@@ -1,0 +1,1 @@
+python train.py -c /opt/ml/code/configs/SATRN12.yaml
