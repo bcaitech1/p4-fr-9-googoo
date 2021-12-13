@@ -118,6 +118,6 @@ optimizer:
 ```
 
 ## experiment report
-T1219_최현진 : https://github.com/bcaitech1/p4-fr-9-googoo/wiki/%5BT1219%5DSATRN-%EC%8B%A4%ED%97%98
+T1219_최현진 : https://github.com/bcaitech1/p4-fr-9-googoo/wiki/%5BT1219_%EC%B5%9C%ED%98%84%EC%A7%84%5DSATRN-%EC%8B%A4%ED%97%98
 
 T1243_김선욱 : https://github.com/23ksw10/Math-Expression-Recognition/blob/main/README.md
